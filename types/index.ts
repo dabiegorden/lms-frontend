@@ -1,4 +1,4 @@
-export type UserRole = "student" | "instructor" | "admin";
+export type UserRole = "student" | "instructor";
 
 export type Grade = "SHS 1" | "SHS 2" | "SHS 3";
 
@@ -62,6 +62,7 @@ export interface RegisterRequest {
   department?: string;
   specialization?: string;
   bio?: string;
+  instructorSecretKey: string;
 }
 
 export interface OnboardingSlide {

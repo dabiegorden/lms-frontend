@@ -1,12 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
 
-const API_URL =
-  Platform.OS === "android"
-    ? "http://10.100.102.131:5000"
-    : "http://10.100.102.131:5000";
-
-const REQUEST_TIMEOUT = 10000; // 10 seconds
+const BASE_URL = "https://lms-p4cvc.sevalla.app";
+const REQUEST_TIMEOUT = 10000;
 
 export interface LoginRequest {
   email: string;
@@ -21,9 +16,12 @@ export interface RegisterRequest {
   phoneNumber?: string;
   gender?: string;
   address?: string;
+  // Student fields
   grade?: string;
   studentId?: string;
+  // Instructor fields
   instructorId?: string;
+  instructorSecretKey?: string;
   department?: string;
   specialization?: string;
   bio?: string;
@@ -39,14 +37,12 @@ export interface AuthResponse {
   };
 }
 
-// Helper function with timeout
 const fetchWithTimeout = async (
   url: string,
   options: RequestInit,
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-
   try {
     const response = await fetch(url, {
       ...options,
@@ -61,50 +57,51 @@ const fetchWithTimeout = async (
 };
 
 class AuthService {
+  // ─── Storage ─────────────────────────────────────────────────────────────────
+
   async storeTokens(accessToken: string, refreshToken: string) {
-    await AsyncStorage.setItem("accessToken", accessToken);
-    await AsyncStorage.setItem("refreshToken", refreshToken);
+    await AsyncStorage.multiSet([
+      ["accessToken", accessToken],
+      ["refreshToken", refreshToken],
+    ]);
   }
 
   async storeUser(user: any) {
     await AsyncStorage.setItem("user", JSON.stringify(user));
   }
 
-  async getAccessToken() {
-    return await AsyncStorage.getItem("accessToken");
+  async getAccessToken(): Promise<string | null> {
+    return AsyncStorage.getItem("accessToken");
   }
 
-  async getRefreshToken() {
-    return await AsyncStorage.getItem("refreshToken");
+  async getRefreshToken(): Promise<string | null> {
+    return AsyncStorage.getItem("refreshToken");
   }
 
-  async getUser() {
-    const userStr = await AsyncStorage.getItem("user");
-    return userStr ? JSON.parse(userStr) : null;
+  async getUser(): Promise<any | null> {
+    const raw = await AsyncStorage.getItem("user");
+    return raw ? JSON.parse(raw) : null;
   }
 
   async clearAuth() {
     await AsyncStorage.multiRemove(["accessToken", "refreshToken", "user"]);
   }
 
-  // ---------------- LOGIN ----------------
+  // ─── Auth ─────────────────────────────────────────────────────────────────────
+
   async login(credentials: LoginRequest): Promise<AuthResponse> {
     try {
-      console.log("LOGIN REQUEST →", `${API_URL}/api/auth/login`);
-
-      const response = await fetchWithTimeout(`${API_URL}/api/auth/login`, {
+      const response = await fetchWithTimeout(`${BASE_URL}/api/auth/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(credentials),
       });
 
       const text = await response.text();
-      const data = text ? JSON.parse(text) : {};
+      const data: AuthResponse = text ? JSON.parse(text) : {};
 
       if (!response.ok) {
-        throw new Error(data.message || "Login failed");
+        throw new Error((data as any).message || "Login failed");
       }
 
       await this.storeTokens(data.data.accessToken, data.data.refreshToken);
@@ -112,34 +109,34 @@ class AuthService {
 
       return data;
     } catch (error: any) {
-      console.log("LOGIN ERROR:", error);
-
       if (error.name === "AbortError") {
-        throw new Error("Request timeout. Server not responding.");
+        throw new Error("Request timed out. Please check your connection.");
       }
-
-      throw new Error("Network request failed. Check server & Expo config.");
+      throw new Error(error.message || "Network error. Please try again.");
     }
   }
 
-  // ---------------- REGISTER ----------------
   async register(userData: RegisterRequest): Promise<AuthResponse> {
     try {
-      console.log("REGISTER REQUEST →", `${API_URL}/api/auth/register`);
+      // Strip empty / undefined optional fields before sending
+      const payload: Record<string, any> = { ...userData };
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === "" || payload[key] === undefined) {
+          delete payload[key];
+        }
+      });
 
-      const response = await fetchWithTimeout(`${API_URL}/api/auth/register`, {
+      const response = await fetchWithTimeout(`${BASE_URL}/api/auth/register`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(userData),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       const text = await response.text();
-      const data = text ? JSON.parse(text) : {};
+      const data: AuthResponse = text ? JSON.parse(text) : {};
 
       if (!response.ok) {
-        throw new Error(data.message || "Registration failed");
+        throw new Error((data as any).message || "Registration failed");
       }
 
       await this.storeTokens(data.data.accessToken, data.data.refreshToken);
@@ -147,33 +144,36 @@ class AuthService {
 
       return data;
     } catch (error: any) {
-      console.log("REGISTER ERROR:", error);
-      throw new Error("Network request failed. Check server & Expo config.");
+      if (error.name === "AbortError") {
+        throw new Error("Request timed out. Please check your connection.");
+      }
+      throw new Error(error.message || "Network error. Please try again.");
     }
   }
 
   async logout() {
-    const accessToken = await this.getAccessToken();
-
-    if (accessToken) {
-      await fetch(`${API_URL}/api/auth/logout`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+    try {
+      const accessToken = await this.getAccessToken();
+      if (accessToken) {
+        await fetch(`${BASE_URL}/api/auth/logout`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      }
+    } catch {
+      // Silently fail — always clear local auth
+    } finally {
+      await this.clearAuth();
     }
-
-    await this.clearAuth();
   }
 
-  async refreshAccessToken() {
+  async refreshAccessToken(): Promise<string | null> {
     try {
       const refreshToken = await this.getRefreshToken();
       if (!refreshToken) return null;
 
       const response = await fetchWithTimeout(
-        `${API_URL}/api/auth/refresh-token`,
+        `${BASE_URL}/api/auth/refresh-token`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -189,7 +189,6 @@ class AuthService {
       }
 
       await this.storeTokens(data.data.accessToken, data.data.refreshToken);
-
       return data.data.accessToken;
     } catch {
       await this.clearAuth();
@@ -197,12 +196,31 @@ class AuthService {
     }
   }
 
-  async isAuthenticated() {
+  async getProfile(): Promise<any> {
+    const accessToken = await this.getAccessToken();
+    if (!accessToken) throw new Error("Not authenticated");
+
+    const response = await fetchWithTimeout(`${BASE_URL}/api/auth/profile`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to fetch profile");
+    }
+
+    await this.storeUser(data.data.user);
+    return data.data.user;
+  }
+
+  async isAuthenticated(): Promise<boolean> {
     return !!(await this.getAccessToken());
   }
 
-  async getCurrentUser() {
-    return await this.getUser();
+  async getCurrentUser(): Promise<any | null> {
+    return this.getUser();
   }
 }
 

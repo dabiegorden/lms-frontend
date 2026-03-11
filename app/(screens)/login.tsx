@@ -1,18 +1,19 @@
+import { Button } from "@/components/Button";
+import { InputField } from "@/components/Inputfield";
+import { Colors } from "@/constants";
+import Authservice from "@/services/Authservice";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
+  Alert,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+  ScrollView,
+  StatusBar,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { Colors } from "@/constants";
-import { InputField } from "@/components/Inputfield";
-import { Button } from "@/components/Button";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -48,40 +49,26 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      // Replace with your actual backend URL
-      const API_URL = "http://localhost:5000";
-
-      const response = await fetch(`${API_URL}/api/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
+      const response = await Authservice.login({
+        email: email.trim().toLowerCase(),
+        password,
       });
 
-      const data = await response.json();
+      const userRole = response.data.user.role;
 
-      if (!response.ok) {
-        throw new Error(data.message || "Login failed");
-      }
-
-      Alert.alert("Success", "Login successful!");
-
-      // Role-based navigation
-      const userRole = data.data.user.role;
-
-      if (userRole === "admin") {
-        router.replace("/admin/dashboard");
-      } else if (userRole === "instructor") {
+      // Route based on role — student → home, instructor → dashboard
+      if (userRole === "instructor") {
         router.replace("/instructor/dashboard");
       } else if (userRole === "student") {
         router.replace("/student/dashboard");
       } else {
-        router.replace("/onboarding");
+        // Unexpected role — clear auth and show error
+        await Authservice.clearAuth();
+        Alert.alert("Access Denied", "Your account type is not supported.");
       }
     } catch (error: any) {
       Alert.alert(
-        "Error",
+        "Login Failed",
         error.message || "Invalid credentials. Please try again.",
       );
     } finally {
@@ -130,7 +117,7 @@ export default function LoginScreen() {
               label="Email Address"
               placeholder="Enter your email"
               value={email}
-              onChangeText={(text: any) => {
+              onChangeText={(text: string) => {
                 setEmail(text);
                 if (errors.email) setErrors({ ...errors, email: undefined });
               }}
@@ -144,7 +131,7 @@ export default function LoginScreen() {
               label="Password"
               placeholder="Enter your password"
               value={password}
-              onChangeText={(text: any) => {
+              onChangeText={(text: string) => {
                 setPassword(text);
                 if (errors.password)
                   setErrors({ ...errors, password: undefined });
@@ -191,7 +178,7 @@ export default function LoginScreen() {
             />
           </View>
 
-          {/* Social Login */}
+          {/* Google login placeholder */}
           <View className="gap-3 mb-8">
             <Button
               title="Continue with Google"

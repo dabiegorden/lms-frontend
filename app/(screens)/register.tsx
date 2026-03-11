@@ -1,22 +1,23 @@
-import React, { useState, useEffect } from "react";
+import { Button } from "@/components/Button";
+import { InputField } from "@/components/Inputfield";
+import { Colors } from "@/constants";
+import Authservice from "@/services/Authservice";
+import { Gender, Grade, RegisterRequest, UserRole } from "@/types";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
+  Alert,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+  ScrollView,
+  StatusBar,
   StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
-import { Colors } from "@/constants";
-import { Gender, Grade, RegisterRequest, UserRole } from "@/types";
-import { InputField } from "@/components/Inputfield";
-import { Button } from "@/components/Button";
 
-// Modern Picker component for dropdowns
+// Picker component for dropdowns
 const PickerField: React.FC<{
   label: string;
   value: string;
@@ -64,6 +65,7 @@ const PickerField: React.FC<{
           ▼
         </Text>
       </TouchableOpacity>
+
       {isOpen && (
         <View
           className="mt-2 rounded-2xl overflow-hidden"
@@ -101,6 +103,7 @@ const PickerField: React.FC<{
           ))}
         </View>
       )}
+
       {error && (
         <Text className="text-sm mt-1.5" style={{ color: Colors.error[500] }}>
           {error}
@@ -126,6 +129,7 @@ export default function RegisterScreen() {
     grade: undefined,
     studentId: "",
     instructorId: "",
+    instructorSecretKey: "",
     department: "",
     specialization: "",
     bio: "",
@@ -134,6 +138,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showSecretKey, setShowSecretKey] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -151,31 +156,30 @@ export default function RegisterScreen() {
 
   const updateField = (field: keyof RegisterRequest, value: any) => {
     setFormData({ ...formData, [field]: value });
-    if (errors[field]) {
-      setErrors({ ...errors, [field]: "" });
-    }
+    if (errors[field]) setErrors({ ...errors, [field]: "" });
   };
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    // Common validations
-    if (!formData.name) newErrors.name = "Name is required";
+    if (!formData.name.trim()) newErrors.name = "Name is required";
+
     if (!formData.email) {
       newErrors.email = "Email is required";
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
       newErrors.email = "Please enter a valid email";
     }
+
     if (!formData.password) {
       newErrors.password = "Password is required";
     } else if (formData.password.length < 6) {
       newErrors.password = "Password must be at least 6 characters";
     }
+
     if (formData.password !== confirmPassword) {
       newErrors.confirmPassword = "Passwords do not match";
     }
 
-    // Role-specific validations
     if (role === "student") {
       if (!formData.grade) newErrors.grade = "Grade is required";
       if (formData.grade === "SHS 3" && !formData.studentId) {
@@ -186,6 +190,9 @@ export default function RegisterScreen() {
     if (role === "instructor") {
       if (!formData.instructorId) {
         newErrors.instructorId = "Instructor ID is required";
+      }
+      if (!formData.instructorSecretKey) {
+        newErrors.instructorSecretKey = "Instructor secret key is required";
       }
     }
 
@@ -198,69 +205,41 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      // Replace with your actual backend URL
-      const API_URL = "http://localhost:5000";
-
-      // Prepare registration data
-      const registrationData: any = {
-        name: formData.name,
-        email: formData.email,
+      const payload: RegisterRequest = {
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
         password: formData.password,
         role: formData.role,
         phoneNumber: formData.phoneNumber || undefined,
         gender: formData.gender || undefined,
         address: formData.address || undefined,
+        instructorSecretKey: formData.instructorSecretKey,
       };
 
-      // Add role-specific fields
       if (role === "student") {
-        registrationData.grade = formData.grade;
-        if (formData.studentId) {
-          registrationData.studentId = formData.studentId;
-        }
-      } else if (role === "instructor") {
-        registrationData.instructorId = formData.instructorId;
-        if (formData.department) {
-          registrationData.department = formData.department;
-        }
-        if (formData.specialization) {
-          registrationData.specialization = formData.specialization;
-        }
-        if (formData.bio) {
-          registrationData.bio = formData.bio;
-        }
+        payload.grade = formData.grade;
+        if (formData.studentId) payload.studentId = formData.studentId;
       }
 
-      const response = await fetch(`${API_URL}/api/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(registrationData),
-      });
-
-      const data = await response.json();
-      console.log("Registration response:", data);
-
-      if (!response.ok) {
-        throw new Error(data.message || "Registration failed");
+      if (role === "instructor") {
+        payload.instructorId = formData.instructorId;
+        payload.instructorSecretKey = formData.instructorSecretKey;
+        if (formData.department) payload.department = formData.department;
+        if (formData.specialization)
+          payload.specialization = formData.specialization;
+        if (formData.bio) payload.bio = formData.bio;
       }
 
-      Alert.alert(
-        "Success",
-        "Registration successful! You can now login with your credentials.",
-        [
-          {
-            text: "OK",
-            onPress: () => router.replace("/login"),
-          },
-        ],
-      );
+      const response = await Authservice.register(payload);
+      const userRole = response.data.user.role;
+
+      if (userRole === "instructor") {
+        router.replace("/instructor/dashboard");
+      } else {
+        router.replace("/student/dashboard");
+      }
     } catch (error: any) {
-      Alert.alert(
-        "Error",
-        error.message || "Registration failed. Please try again.",
-      );
+      Alert.alert("Registration Failed", error.message || "Please try again.");
     } finally {
       setLoading(false);
     }
@@ -308,49 +287,14 @@ export default function RegisterScreen() {
               </View>
               <Text className="text-lg" style={styles.subtitle}>
                 Create your {role === "student" ? "student" : "instructor"}{" "}
-                account and start learning
-              </Text>
-            </View>
-          </View>
-
-          {/* Progress Indicator */}
-          <View className="mb-8">
-            <View className="flex-row items-center">
-              <View className="flex-1 flex-row items-center">
-                <View
-                  className="w-8 h-8 rounded-full items-center justify-center"
-                  style={{ backgroundColor: Colors.primary[500] }}
-                >
-                  <Text className="text-white text-xs font-bold">1</Text>
-                </View>
-                <View
-                  className="flex-1 h-1 mx-2"
-                  style={{ backgroundColor: Colors.primary[500] }}
-                />
-              </View>
-              <View
-                className="w-8 h-8 rounded-full items-center justify-center"
-                style={{ backgroundColor: Colors.gray[200] }}
-              >
-                <Text className="text-gray-500 text-xs font-bold">2</Text>
-              </View>
-            </View>
-            <View className="flex-row justify-between mt-2">
-              <Text
-                className="text-xs font-semibold"
-                style={{ color: Colors.primary[600] }}
-              >
-                Account Details
-              </Text>
-              <Text className="text-xs" style={{ color: Colors.gray[400] }}>
-                Complete
+                account and start {role === "student" ? "learning" : "teaching"}
               </Text>
             </View>
           </View>
 
           {/* Form */}
           <View className="mb-6">
-            {/* Section: Personal Information */}
+            {/* Personal Information */}
             <View className="mb-6">
               <Text
                 className="text-lg font-bold mb-4"
@@ -396,79 +340,110 @@ export default function RegisterScreen() {
               />
             </View>
 
-            {/* Section: Academic Information */}
-            {(role === "student" || role === "instructor") && (
-              <View className="mb-6">
-                <Text
-                  className="text-lg font-bold mb-4"
-                  style={{ color: Colors.gray[900] }}
-                >
-                  Academic Information
-                </Text>
+            {/* Academic Information */}
+            <View className="mb-6">
+              <Text
+                className="text-lg font-bold mb-4"
+                style={{ color: Colors.gray[900] }}
+              >
+                Academic Information
+              </Text>
 
-                {role === "student" && (
-                  <>
-                    <PickerField
-                      label="Grade"
-                      value={formData.grade || ""}
-                      options={gradeOptions}
-                      onSelect={(value) => updateField("grade", value as Grade)}
-                      error={errors.grade}
-                    />
+              {role === "student" && (
+                <>
+                  <PickerField
+                    label="Grade"
+                    value={formData.grade || ""}
+                    options={gradeOptions}
+                    onSelect={(value) => updateField("grade", value as Grade)}
+                    error={errors.grade}
+                  />
 
-                    {(formData.grade === "SHS 3" || formData.studentId) && (
-                      <InputField
-                        label={
-                          formData.grade === "SHS 3"
-                            ? "Student ID"
-                            : "Student ID (Optional)"
-                        }
-                        placeholder="Enter your student ID"
-                        value={formData.studentId}
-                        onChangeText={(text) => updateField("studentId", text)}
-                        error={errors.studentId}
-                        icon={
-                          <Text style={{ color: Colors.gray[400] }}>🎫</Text>
-                        }
-                      />
-                    )}
-                  </>
-                )}
-
-                {role === "instructor" && (
-                  <>
+                  {(formData.grade === "SHS 3" || formData.studentId) && (
                     <InputField
-                      label="Instructor ID"
-                      placeholder="Enter your instructor ID"
-                      value={formData.instructorId}
-                      onChangeText={(text) => updateField("instructorId", text)}
-                      error={errors.instructorId}
+                      label={
+                        formData.grade === "SHS 3"
+                          ? "Student ID"
+                          : "Student ID (Optional)"
+                      }
+                      placeholder="Enter your student ID"
+                      value={formData.studentId}
+                      onChangeText={(text) => updateField("studentId", text)}
+                      error={errors.studentId}
                       icon={<Text style={{ color: Colors.gray[400] }}>🎫</Text>}
                     />
+                  )}
+                </>
+              )}
 
-                    <InputField
-                      label="Department"
-                      placeholder="e.g., Mathematics, Science"
-                      value={formData.department}
-                      onChangeText={(text) => updateField("department", text)}
-                      icon={<Text style={{ color: Colors.gray[400] }}>🏢</Text>}
-                    />
+              {role === "instructor" && (
+                <>
+                  <InputField
+                    label="Instructor ID"
+                    placeholder="Enter your instructor ID"
+                    value={formData.instructorId}
+                    onChangeText={(text) => updateField("instructorId", text)}
+                    error={errors.instructorId}
+                    icon={<Text style={{ color: Colors.gray[400] }}>🎫</Text>}
+                  />
 
-                    <InputField
-                      label="Specialization"
-                      placeholder="e.g., Calculus, Physics"
-                      value={formData.specialization}
-                      onChangeText={(text) =>
-                        updateField("specialization", text)
-                      }
-                      icon={<Text style={{ color: Colors.gray[400] }}>📚</Text>}
-                    />
-                  </>
-                )}
+                  <InputField
+                    label="Department"
+                    placeholder="e.g., Mathematics, Science"
+                    value={formData.department}
+                    onChangeText={(text) => updateField("department", text)}
+                    icon={<Text style={{ color: Colors.gray[400] }}>🏢</Text>}
+                  />
+
+                  <InputField
+                    label="Specialization"
+                    placeholder="e.g., Calculus, Physics"
+                    value={formData.specialization}
+                    onChangeText={(text) => updateField("specialization", text)}
+                    icon={<Text style={{ color: Colors.gray[400] }}>📚</Text>}
+                  />
+                </>
+              )}
+            </View>
+
+            {/* Instructor Access — secret key section */}
+            {role === "instructor" && (
+              <View className="mb-6">
+                <Text
+                  className="text-lg font-bold mb-1"
+                  style={{ color: Colors.gray[900] }}
+                >
+                  Instructor Access
+                </Text>
+                <Text
+                  className="text-sm mb-4"
+                  style={{ color: Colors.gray[500] }}
+                >
+                  A secret key is required to verify your instructor status.
+                  Contact your school administrator to obtain one.
+                </Text>
+
+                <InputField
+                  label="Instructor Secret Key"
+                  placeholder="Enter the secret key provided by admin"
+                  value={formData.instructorSecretKey}
+                  onChangeText={(text) =>
+                    updateField("instructorSecretKey", text)
+                  }
+                  error={errors.instructorSecretKey}
+                  secureTextEntry={!showSecretKey}
+                  icon={<Text style={{ color: Colors.gray[400] }}>🔑</Text>}
+                  rightIcon={
+                    <Text style={{ color: Colors.gray[400] }}>
+                      {showSecretKey ? "👁️" : "👁️‍🗨️"}
+                    </Text>
+                  }
+                  onRightIconPress={() => setShowSecretKey(!showSecretKey)}
+                />
               </View>
             )}
 
-            {/* Section: Security */}
+            {/* Security */}
             <View className="mb-6">
               <Text
                 className="text-lg font-bold mb-4"
@@ -572,9 +547,7 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  scrollContent: {
-    flexGrow: 1,
-  },
+  scrollContent: { flexGrow: 1 },
   backButton: {
     backgroundColor: Colors.gray[50],
     borderWidth: 1,
